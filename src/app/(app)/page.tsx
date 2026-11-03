@@ -33,11 +33,11 @@ export default async function Overview({ searchParams }: { searchParams: Promise
       </div>
 
       <div className="strip">
-        <div><span className="k">Returns due</span><span className="v">{totals.due}</span></div>
-        <div><span className="k">Received</span><span className="v">{totals.received} <small>({totals.due ? Math.round((totals.received / totals.due) * 100) : 0}%)</small></span></div>
-        <div><span className="k">Accepted</span><span className="v">{totals.accepted}</span></div>
-        <div><span className="k">Flagged or queried</span><span className="v">{totals.flagged}</span></div>
-        <div><span className="k">Outstanding</span><span className="v">{totals.missing}</span></div>
+        <div><span className="k">Returns due</span><span className="v">{totals.due}</span><span className="d">For {periodLabel(period)}</span></div>
+        <div><span className="k">Received</span><span className="v">{totals.received}</span><span className="d">{totals.due ? Math.round((totals.received / totals.due) * 100) : 0}% of returns due</span></div>
+        <div><span className="k">Accepted</span><span className="v">{totals.accepted}</span><span className="d">Passed review</span></div>
+        <div><span className="k">Flagged or queried</span><span className="v">{totals.flagged}</span><span className="d">Need a correction or reply</span></div>
+        <div><span className="k">Outstanding</span><span className="v">{totals.missing}</span><span className="d">Not yet filed</span></div>
       </div>
 
       <div className="card">
@@ -64,11 +64,11 @@ export default async function Overview({ searchParams }: { searchParams: Promise
       {tech && com && (
         <>
           <div className="strip">
-            <div><span className="k">Avg. supply per feeder</span><span className="v">{fmt(tech.total.avgHours, 1)} <small>h/day</small></span></div>
-            <div><span className="k">Feeders meeting band</span><span className="v">{pct(tech.total.compliance, 0)}</span></div>
-            <div><span className="k">Energy delivered</span><span className="v">{fmt(tech.total.delivered / 1000, 1)} <small>GWh</small></span></div>
-            <div><span className="k">Collection efficiency</span><span className="v">{pct(com.total.ce, 1)}</span></div>
-            <div><span className="k">ATC&amp;C loss</span><span className="v">{pct(com.total.atcc, 1)}</span></div>
+            <div><span className="k">Avg. supply per feeder</span><span className="v">{fmt(tech.total.avgHours, 1)}</span><span className="d">Hours per day</span></div>
+            <div><span className="k">Feeders meeting band</span><span className="v">{pct(tech.total.compliance, 0)}</span><span className="d">Against band minimum</span></div>
+            <div><span className="k">Energy delivered</span><span className="v">{fmt(tech.total.delivered / 1000, 1)}</span><span className="d">GWh</span></div>
+            <div><span className="k">Collection efficiency</span><span className="v">{pct(com.total.ce, 1)}</span><span className="d">Collected over billed</span></div>
+            <div><span className="k">ATC&amp;C loss</span><span className="v">{pct(com.total.atcc, 1)}</span><span className="d">Aggregate technical, commercial &amp; collection</span></div>
           </div>
           <div className="panels">
             <div className="card">

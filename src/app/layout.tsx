@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { Archivo, Source_Sans_3, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const archivo = Archivo({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-archivo" });
-const source = Source_Sans_3({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-source" });
-const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
+const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-inter" });
+const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: "OGSERC Data Hub",
@@ -13,7 +12,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en-GB" className={`${archivo.variable} ${source.variable} ${mono.variable}`}>
+    <html lang="en-GB" className={`${inter.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   );

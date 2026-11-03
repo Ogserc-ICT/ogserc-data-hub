@@ -8,7 +8,9 @@ export default function LoginPage() {
     <main className="login">
       <form action={action} className="card">
         <div>
-          <span className="eyebrow">Ogun State Electricity Regulatory Commission</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="login-logo" src="/brand/ogserc-logo.png" alt="OGSERC" />
+          <span className="eyebrow" style={{ display: "block" }}>Ogun State Electricity Regulatory Commission</span>
           <h2 style={{ fontSize: 22 }}>OGSERC Data Hub</h2>
           <p className="sub">Sign in with the account the Commission issued to you.</p>
         </div>
