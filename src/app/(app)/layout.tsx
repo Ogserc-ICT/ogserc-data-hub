@@ -7,6 +7,7 @@ import { defaultPeriod, isPeriod, recentPeriods } from "@/lib/periods";
 import { db, schema } from "@/db";
 import { logout } from "../login/actions";
 import PeriodSelectClient from "./PeriodSelectClient";
+import SideMenu from "./SideMenu";
 import Tabs, { type NavGroup } from "./Tabs";
 
 export const dynamic = "force-dynamic";
@@ -40,12 +41,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Africa/Lagos" }).replace(/ /g, "-");
   return (
     <div className="shell">
-      <aside className="side">
+      <SideMenu brand={
         <Link href="/" className="side-brand plain">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/ogserc-logo.png" alt="OGSERC" />
           <span><b>Data Hub</b><small>Regulatory returns</small></span>
         </Link>
+      }>
         {groups.length > 0 && <Suspense><Tabs groups={groups} /></Suspense>}
         <div className="side-user">
           <div className="side-who">
@@ -57,7 +59,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <form action={logout}><button className="linkbtn" type="submit">Sign out</button></form>
           </div>
         </div>
-      </aside>
+      </SideMenu>
       <div className="main-col">
         <header className="topbar">
           <Suspense><PeriodSelectClient periods={periods} fallback={period} /></Suspense>
