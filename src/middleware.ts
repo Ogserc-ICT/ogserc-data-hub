@@ -22,5 +22,5 @@ export async function middleware(req: NextRequest) {
 
 // /api/v1 uses API keys, not sessions, and is checked in the route handlers.
 export const config = {
-  matcher: ["/((?!login|api/v1|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!login|api/v1|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|brand/).*)"],
 };
