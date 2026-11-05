@@ -1,9 +1,19 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-inter" });
-const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-mono" });
+const inter = localFont({
+  src: "./fonts/InterVariable.woff2",
+  weight: "100 900",
+  variable: "--font-inter",
+  display: "swap",
+});
+const mono = localFont({
+  src: "./fonts/JetBrainsMonoVariable.woff2",
+  weight: "100 800",
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "OGSERC Data Hub",
