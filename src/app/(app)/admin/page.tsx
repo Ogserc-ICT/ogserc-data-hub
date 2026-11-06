@@ -1,19 +1,20 @@
-import { asc } from "drizzle-orm";
+import { asc, count } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { DATASETS } from "@/lib/datasets";
 import { revokeApiKey, saveHubAliases, toggleLicensee, toggleUser } from "./actions";
-import { ApiKeyForm, LicenseeForm, NewUserForm, ResetPasswordForm } from "./Forms";
+import { ApiKeyForm, ClearSubmissionsForm, DeleteUserForm, LicenseeForm, NewUserForm, ResetPasswordForm } from "./Forms";
 
 const ROLE_LABEL = { admin: "Administrator", reviewer: "Reviewer", licensee: "Licensee officer" } as const;
 
 export default async function AdminPage() {
   const me = await requireAdmin();
-  const [users, lics, hubs, keys] = await Promise.all([
+  const [users, lics, hubs, keys, subCounts] = await Promise.all([
     db.select().from(schema.users).orderBy(asc(schema.users.role), asc(schema.users.name)),
     db.select().from(schema.licensees).orderBy(asc(schema.licensees.sortOrder), asc(schema.licensees.name)),
     db.select().from(schema.hubs).orderBy(asc(schema.hubs.licenseeId), asc(schema.hubs.name)),
     db.select().from(schema.apiKeys).orderBy(asc(schema.apiKeys.createdAt)),
+    db.select({ status: schema.submissions.status, n: count() }).from(schema.submissions).groupBy(schema.submissions.status),
   ]);
   const active = lics.filter((l) => l.active);
   return (
@@ -45,6 +46,7 @@ export default async function AdminPage() {
                       {u.id !== me.uid && (
                         <form action={toggleUser}><input type="hidden" name="id" value={u.id} /><button type="submit">{u.active ? "Deactivate" : "Reactivate"}</button></form>
                       )}
+                      {u.id !== me.uid && <DeleteUserForm id={u.id} name={u.name} />}
                     </div>
                   </td>
                 </tr>
@@ -119,6 +121,7 @@ export default async function AdminPage() {
         ) : <p className="sub small">No keys issued.</p>}
       </div>
       <ApiKeyForm licensees={active.map((l) => ({ id: l.id, name: l.name }))} />
+      <ClearSubmissionsForm counts={Object.fromEntries(subCounts.map((c) => [c.status, c.n]))} />
     </section>
   );
 }

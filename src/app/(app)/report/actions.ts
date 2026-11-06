@@ -6,8 +6,11 @@ import { isPeriod } from "@/lib/periods";
 
 export type NoteState = { ok?: boolean; error?: string };
 
-/** Report keys are period + scope ("2026-07" or "2026-07:ibedc"), so each licensee edition keeps its own commentary. */
-const validKey = (k: string) => /^\d{4}-(0[1-9]|1[0-2])(:[a-z0-9-]+)?$/.test(k);
+/**
+ * Report keys are period + scope ("2026-07", "2026-Q3", "2026-FY", optionally ":ibedc"),
+ * so each monthly, quarterly, annual and licensee edition keeps its own commentary.
+ */
+const validKey = (k: string) => /^\d{4}-(0[1-9]|1[0-2]|Q[1-4]|FY)(:[a-z0-9-]+)?$/.test(k);
 
 export async function saveNote(_: NoteState, form: FormData): Promise<NoteState> {
   const user = await requireCommission();

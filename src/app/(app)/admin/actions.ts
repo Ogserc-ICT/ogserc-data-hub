@@ -1,13 +1,13 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { db, schema } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { LICENSEE_DATASETS, type DatasetCode } from "@/lib/datasets";
 import { newKey } from "@/lib/apikey";
 import { and, isNull } from "drizzle-orm";
-import type { Role } from "@/db/schema";
+import type { Role, SubmissionStatus } from "@/db/schema";
 
 export type AdminState = { ok?: string; error?: string };
 
@@ -70,6 +70,57 @@ export async function toggleUser(form: FormData) {
   // Deactivating also ends any open sessions.
   await db.update(schema.users).set({ active: !u.active, sessionVersion: sql`${schema.users.sessionVersion} + 1` }).where(eq(schema.users.id, id));
   revalidatePath("/admin");
+}
+
+/**
+ * Permanently removes an account. Records the person touched keep their content: submissions still show the
+ * submitter's name (stored on the submission), but the links back to the account are cleared.
+ */
+export async function deleteUser(_: AdminState, form: FormData): Promise<AdminState> {
+  const me = await requireAdmin();
+  const id = String(form.get("id") ?? "");
+  if (id === me.uid) return { error: "You cannot delete your own account." };
+  const u = await db.query.users.findFirst({ where: eq(schema.users.id, id) });
+  if (!u) return { error: "That user no longer exists." };
+  try {
+    await db.transaction(async (tx) => {
+      await tx.update(schema.submissions).set({ submittedById: null }).where(eq(schema.submissions.submittedById, id));
+      await tx.update(schema.submissions).set({ reviewedById: null }).where(eq(schema.submissions.reviewedById, id));
+      await tx.update(schema.apiKeys).set({ createdById: null }).where(eq(schema.apiKeys.createdById, id));
+      await tx.update(schema.commissionMonthly).set({ updatedById: null }).where(eq(schema.commissionMonthly.updatedById, id));
+      await tx.update(schema.reportNotes).set({ updatedById: null }).where(eq(schema.reportNotes.updatedById, id));
+      await tx.update(schema.settings).set({ updatedById: null }).where(eq(schema.settings.updatedById, id));
+      await tx.delete(schema.users).where(eq(schema.users.id, id));
+    });
+  } catch (e) {
+    console.error("deleteUser failed", e);
+    return { error: "The account could not be deleted. Try again, or deactivate it instead." };
+  }
+  revalidatePath("/admin");
+  return { ok: `${u.name}'s account has been deleted.` };
+}
+
+/** Submission statuses an administrator may clear in bulk (form fields st_<status>). */
+const CLEARABLE: SubmissionStatus[] = ["received", "superseded", "staged", "accepted", "queried", "discarded"];
+
+/**
+ * Deletes every submission with the chosen statuses. Filings and the monthly data rows they supplied are removed
+ * with them (ON DELETE CASCADE), so dashboards and reports no longer show that data.
+ */
+export async function clearSubmissions(_: AdminState, form: FormData): Promise<AdminState> {
+  await requireAdmin();
+  const statuses = CLEARABLE.filter((s) => form.get(`st_${s}`) === "on");
+  if (!statuses.length) return { error: "Choose at least one status to clear." };
+  if (String(form.get("confirm") ?? "").trim() !== "DELETE") return { error: "Type DELETE in capitals to confirm." };
+  let n = 0;
+  try {
+    n = (await db.delete(schema.submissions).where(inArray(schema.submissions.status, statuses)).returning({ id: schema.submissions.id })).length;
+  } catch (e) {
+    console.error("clearSubmissions failed", e);
+    return { error: "The submissions could not be cleared. Nothing was deleted." };
+  }
+  revalidatePath("/", "layout");
+  return { ok: n ? `Cleared ${n} submission${n === 1 ? "" : "s"} and the data filed from them.` : "There were no submissions with those statuses." };
 }
 
 export async function saveLicensee(_: AdminState, form: FormData): Promise<AdminState> {

@@ -32,7 +32,7 @@ export default function Tabs({ groups }: { groups: NavGroup[] }) {
           {g.items.map((t) => {
             const active = t.href === "/" ? path === "/" : path.startsWith(t.href);
             return (
-              <Link key={t.href} href={period ? `${t.href}?period=${period}` : t.href} aria-current={active ? "page" : undefined}>
+              <Link key={t.href} href={period && t.href !== "/report" ? `${t.href}?period=${period}` : t.href} aria-current={active ? "page" : undefined}>
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICONS[t.icon]}</svg>
                 {t.label}
               </Link>

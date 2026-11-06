@@ -1,17 +1,41 @@
 "use client";
 import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SPAN_KINDS, type SpanKind } from "@/lib/periods";
 import { saveNote, type NoteState } from "./actions";
 
 export function PrintButton() {
   return <button type="button" className="primary" onClick={() => window.print()}>Print or save as PDF</button>;
 }
 
-export function ScopeSelect({ period, value, licensees }: { period: string; value: string; licensees: { id: string; label: string }[] }) {
+type Opt = { value: string; label: string };
+const reportUrl = (span: SpanKind, period: string, licensee: string) =>
+  `/report?${new URLSearchParams({ ...(span !== "month" ? { span } : {}), period, ...(licensee ? { licensee } : {}) }).toString()}`;
+
+/** Monthly, quarterly or annual edition, and which month / quarter / year. */
+export function ReportPeriod({ span, period, licensee, options }: { span: SpanKind; period: string; licensee: string; options: Record<SpanKind, Opt[]> }) {
+  const router = useRouter();
+  return (
+    <>
+      <label className="ctl" htmlFor="rspan">Report type
+        <select id="rspan" value={span} onChange={(e) => { const k = e.target.value as SpanKind; router.push(reportUrl(k, options[k][0].value, licensee)); }}>
+          {SPAN_KINDS.map((s) => <option key={s.kind} value={s.kind}>{s.label}</option>)}
+        </select>
+      </label>
+      <label className="ctl" htmlFor="rperiod">Reporting period
+        <select id="rperiod" value={period} onChange={(e) => router.push(reportUrl(span, e.target.value, licensee))}>
+          {options[span].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </label>
+    </>
+  );
+}
+
+export function ScopeSelect({ span, period, value, licensees }: { span: SpanKind; period: string; value: string; licensees: { id: string; label: string }[] }) {
   const router = useRouter();
   return (
     <label className="ctl" htmlFor="scope">Report for
-      <select id="scope" value={value} onChange={(e) => router.push(`/report?period=${period}${e.target.value ? `&licensee=${e.target.value}` : ""}`)}>
+      <select id="scope" value={value} onChange={(e) => router.push(reportUrl(span, period, e.target.value))}>
         <option value="">Ogun State (all licensees)</option>
         {licensees.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
       </select>

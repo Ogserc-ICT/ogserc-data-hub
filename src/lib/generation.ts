@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { daysIn, window } from "./periods";
 import { getSettings } from "./settings-db";
@@ -10,13 +10,13 @@ const e = (x: Record<string, unknown>, k: string) => (typeof x[k] === "number" ?
 const r = (a: number, b: number) => (b ? a / b : null);
 
 /** Generation KPIs on the EMPR generation workbook's method, plus the register and plan cycle. */
-export async function generation(period: string) {
+export async function generation(period: string, span: string[] = [period]) {
   const s = await getSettings();
-  const months = window(period, 7);
+  const months = window(period, Math.max(7, span.length));
   const [assets, units, plantRows, evals, lics] = await Promise.all([
     db.select().from(schema.generationAssets),
     db.select().from(schema.genUnitMonthly).where(inArray(schema.genUnitMonthly.period, months)),
-    db.select().from(schema.genPlantMonthly).where(eq(schema.genPlantMonthly.period, period)),
+    db.select().from(schema.genPlantMonthly).where(inArray(schema.genPlantMonthly.period, span)),
     db.select().from(schema.planEvaluations),
     db.select().from(schema.licensees),
   ]);
@@ -39,13 +39,15 @@ export async function generation(period: string) {
       co2: sum(us.map((u) => e(u.ext, "co2T"))),
     };
   };
-  const cur = units.filter((u) => u.period === period);
+  const cur = units.filter((u) => span.includes(u.period));
   const plantKpis = [...new Set(cur.map((u) => `${u.licenseeId}|${u.plantCode}`))].map((k) => {
     const [lic, code] = k.split("|");
     const l = lics.find((x) => x.id === lic);
     const asset = assets.find((a) => a.aliases.includes(`${(l?.code || lic).toUpperCase()}:${code.toUpperCase()}`) || a.code === code);
-    const pr = plantRows.find((p) => p.licenseeId === lic && p.plantCode === code);
-    const x = pr?.ext ?? {};
+    // Plant returns over several months: add up the monthly figures.
+    const x: Record<string, unknown> = {};
+    for (const p of plantRows.filter((p) => p.licenseeId === lic && p.plantCode === code))
+      for (const [k, v] of Object.entries(p.ext ?? {})) if (typeof v === "number") x[k] = ((x[k] as number) ?? 0) + v;
     const delivered = sum(["toOgunDiscos", "toOgunBilateral", "toGrid", "toOther"].map((f) => e(x, f)));
     return {
       plant: asset?.name ?? `${l?.code ?? lic} ${code}`, licensee: l?.code ?? lic, ...kpis(cur.filter((u) => u.licenseeId === lic && u.plantCode === code)),

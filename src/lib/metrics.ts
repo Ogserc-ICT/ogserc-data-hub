@@ -3,7 +3,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Feeder } from "@/db/schema";
 import { BANDS, COMMISSION_INDICATORS, COMPLAINT_CATEGORIES, DATASETS, type DatasetCode } from "./datasets";
-import { addMonths, daysIn, window } from "./periods";
+import { addMonths, daysIn, monthsBetween, window } from "./periods";
 import { COMMISSION_FILER } from "./ingest/commit";
 import { getSettings } from "./settings-db";
 import type { Issue } from "@/db/schema";
@@ -13,7 +13,17 @@ export const ratio = (a: number | null | undefined, b: number | null | undefined
 const mean = (xs: (number | null | undefined)[]) => { const v = xs.filter((x): x is number => typeof x === "number"); return v.length ? sum(v) / v.length : null; };
 const extN = (e: Record<string, unknown> | null | undefined, k: string) => (e && typeof e[k] === "number" ? (e[k] as number) : null);
 const yearStart = (p: string) => `${p.slice(0, 4)}-01`;
-const monthsBetween = (a: string, b: string) => { const out: string[] = []; for (let m = a; m <= b; m = addMonths(m, 1)) out.push(m); return out; };
+const uniq = <T,>(xs: T[]) => [...new Set(xs)];
+
+/**
+ * Months a figure covers. `months` is the reporting span (one month, a quarter or a year, ending at `period`);
+ * `prevMonths` is the span it is compared with. Both default to the single month and the month before.
+ */
+export type SpanOpts = { months?: string[]; prevMonths?: string[] };
+const spanOf = (period: string, o: SpanOpts) => {
+  const span = o.months?.length ? o.months : [period];
+  return { span, prevSpan: o.prevMonths?.length ? o.prevMonths : span.map((m) => addMonths(m, -span.length)) };
+};
 
 export type FilingStatus = "missing" | "received" | "flagged" | "accepted" | "queried" | "not-required";
 
@@ -63,11 +73,27 @@ function groupTotals(scope: FM[], all: FM[], fmap: Map<string, Feeder>, field: "
   return sum(scope.filter((r) => { const f = fmap.get(r.feederId); return f && !(f.parentId && fmap.has(f.parentId)); }).map((r) => group(r.feederId)));
 }
 
-export async function technical(period: string, opts: { licensee?: string | null; trendMonths?: number } = {}) {
+/**
+ * One row per feeder across the span: average hours a day over the months reported, energy and interruptions summed.
+ * For a single month this is the month's own rows.
+ */
+function perFeeder(rs: FM[]): FM[] {
+  const by = new Map<string, FM[]>();
+  for (const r of rs) by.set(r.feederId, [...(by.get(r.feederId) ?? []), r]);
+  return [...by.values()].map((g) => {
+    if (g.length === 1) return g[0];
+    const last = g.reduce((a, b) => (b.period > a.period ? b : a));
+    const anyOf = (k: "deliveredMwh" | "nominatedMwh" | "interruptions") => (g.some((r) => r[k] != null) ? sum(g.map((r) => r[k])) : null);
+    return { ...last, hoursPerDay: mean(g.map((r) => r.hoursPerDay)), deliveredMwh: anyOf("deliveredMwh"), nominatedMwh: anyOf("nominatedMwh"), interruptions: anyOf("interruptions") };
+  });
+}
+
+export async function technical(period: string, opts: { licensee?: string | null; trendMonths?: number } & SpanOpts = {}) {
   const s = await getSettings();
-  const months = window(period, opts.trendMonths ?? 7);
+  const { span, prevSpan } = spanOf(period, opts);
+  const months = window(period, opts.trendMonths ?? Math.max(7, span.length));
   const ytd = monthsBetween(yearStart(period), period);
-  const all = [...new Set([...months, ...ytd])];
+  const all = uniq([...months, ...ytd, ...span, ...prevSpan]);
   const lw = opts.licensee ? eq(schema.feederMonthly.licenseeId, opts.licensee) : undefined;
   const [rows, feeders, hubs] = await Promise.all([
     db.select().from(schema.feederMonthly).where(and(inArray(schema.feederMonthly.period, all), lw)),
@@ -95,7 +121,7 @@ export async function technical(period: string, opts: { licensee?: string | null
     const custH = rs.some((r) => extN(r.ext, "customerHours") != null) ? sum(rs.map((r) => extN(r.ext, "customerHours"))) : null;
     const faultTrips = rs.some((r) => extN(r.ext, "faultTrips") != null) ? sum(rs.map((r) => extN(r.ext, "faultTrips"))) : null;
     return {
-      feeders: rs.length, reporting: withH.length, returned: rs.filter((r) => r.deliveredMwh != null).length, avgHours: mean(withH.map((r) => r.hoursPerDay)), meeting: withH.filter(meets).length,
+      feeders: uniq(rs.map((r) => r.feederId)).length, reporting: uniq(withH.map((r) => r.feederId)).length, returned: rs.filter((r) => r.deliveredMwh != null).length, avgHours: mean(withH.map((r) => r.hoursPerDay)), meeting: withH.filter(meets).length,
       compliance: ratio(withH.filter(meets).length, withH.length), delivered, nominated, unserved: Math.max(0, nominated - delivered), fulfilment: ratio(delivered, nominated),
       interruptions: sum(rs.map((r) => r.interruptions)), interruptionsPerFeeder: ratio(sum(rs.map((r) => r.interruptions)), rs.length),
       faultTrips, saifi: custInt != null && custConn ? custInt / custConn : null, saidi: custH != null && custConn ? custH / custConn : null,
@@ -103,8 +129,8 @@ export async function technical(period: string, opts: { licensee?: string | null
       extendedReported: rs.filter((r) => ["peakLoadMw", "maxKv", "customersConnected", "outageHours"].some((k) => extN(r.ext, k) != null)).length,
     };
   };
-  const cur = rows.filter((r) => r.period === period);
-  const prevP = addMonths(period, -1);
+  const cur = rows.filter((r) => span.includes(r.period));
+  const curF = perFeeder(cur);
   const byBand = BANDS.map((b) => ({ band: b, threshold: s.bandHours[b], ...summarise(cur.filter((r) => r.band === b)) })).filter((x) => x.feeders);
   const hubIds = [...new Set(cur.map((r) => fmap.get(r.feederId)?.hubId ?? null))];
   const byHub = hubIds.map((h) => ({ hubId: h, hub: hubName(h), ...summarise(cur.filter((r) => (fmap.get(r.feederId)?.hubId ?? null) === h)) })).sort((a, b) => b.delivered - a.delivered);
@@ -113,23 +139,23 @@ export async function technical(period: string, opts: { licensee?: string | null
   const trend = months.map((m) => ({ period: m, ...summarise(rows.filter((r) => r.period === m)) }));
   const ytdSum = summarise(rows.filter((r) => ytd.includes(r.period)));
 
-  const worst = cur.filter(reported)
+  const worst = curF.filter(reported)
     .map((r) => { const f = fmap.get(r.feederId); return { feeder: f?.name ?? r.feederId, code: f?.code, licenseeId: r.licenseeId, hub: hubName(f?.hubId), band: r.band, owed: r.bandHours, hours: r.hoursPerDay ?? 0, gap: (r.hoursPerDay ?? 0) - r.bandHours, interruptions: r.interruptions ?? 0 }; })
     .filter((x) => x.gap < 0).sort((a, b) => a.gap - b.gap).slice(0, 10);
 
   // Hours withheld between an injection point and the feeders drawn through it.
   const groups = new Map<string, FM[]>();
-  for (const r of cur) { const p = fmap.get(r.feederId)?.parentId; if (p) groups.set(p, [...(groups.get(p) ?? []), r]); }
+  for (const r of curF) { const p = fmap.get(r.feederId)?.parentId; if (p) groups.set(p, [...(groups.get(p) ?? []), r]); }
   const rationing = [...groups.entries()].map(([pid, kids]) => {
-    const parent = cur.find((r) => r.feederId === pid);
+    const parent = curF.find((r) => r.feederId === pid);
     const downstream = mean(kids.map((k) => k.hoursPerDay));
     return { injection: fmap.get(pid)?.name ?? pid, hub: hubName(fmap.get(pid)?.hubId), injectionHours: parent?.hoursPerDay ?? null, downstreamHours: downstream, withheld: parent?.hoursPerDay != null && downstream != null ? parent.hoursPerDay - downstream : null, children: kids.length };
   }).filter((g) => g.injectionHours != null).sort((a, b) => (b.withheld ?? 0) - (a.withheld ?? 0));
   // Injection meters reading below the feeders they supply (metering integrity).
-  const meterBelow = [...groups.entries()].filter(([pid, kids]) => { const p = cur.find((r) => r.feederId === pid); return p?.deliveredMwh != null && sum(kids.map((k) => k.deliveredMwh)) > p.deliveredMwh * 1.02; }).length;
+  const meterBelow = [...groups.entries()].filter(([pid, kids]) => { const p = curF.find((r) => r.feederId === pid); return p?.deliveredMwh != null && sum(kids.map((k) => k.deliveredMwh)) > p.deliveredMwh * 1.02; }).length;
 
   return {
-    period, months, total: summarise(cur), prev: summarise(rows.filter((r) => r.period === prevP)), ytd: ytdSum, ytdMonths: ytd,
+    period, months, span, total: summarise(cur), prev: summarise(rows.filter((r) => prevSpan.includes(r.period))), ytd: ytdSum, ytdMonths: ytd,
     byBand, byHub, bySegment, byLicensee, trend, worst, rationing, meterBelow, hasData: cur.length > 0, daysInMonth: daysIn(period),
     registered: feeders.length, expected: feeders.filter((f) => f.status !== "Decommissioned").length,
     unconfirmedClass: feeders.filter((f) => /inferred/i.test(f.classificationBasis ?? "") || !f.segment).length,
@@ -149,9 +175,13 @@ export function summariseCommercial(rs: CM[]) {
   const collected = sum(rs.flatMap((r) => [r.collectedNgnMd, r.collectedNgnNmd]));
   const arrearsRows = rs.filter((r) => r.arrearsNgn != null);
   const collectedMd = sum(rs.map((r) => r.collectedNgnMd)), billedMd = sum(rs.map((r) => r.billedNgnMd));
-  const custMetered = sum(rs.flatMap((r) => [r.custMeteredMd, r.custMeteredNmd]));
-  const custUnmetered = sum(rs.flatMap((r) => [r.custUnmeteredMd, r.custUnmeteredNmd]));
-  const md = sum(rs.flatMap((r) => [r.custMeteredMd, r.custUnmeteredMd])), mdMetered = sum(rs.map((r) => r.custMeteredMd));
+  // Customer numbers are a stock, not a flow: over several months take each unit's latest return.
+  const lastOf = new Map<string, string>();
+  for (const r of rs) if ((lastOf.get(r.hubId) ?? "") < r.period) lastOf.set(r.hubId, r.period);
+  const latest = rs.filter((r) => lastOf.get(r.hubId) === r.period);
+  const custMetered = sum(latest.flatMap((r) => [r.custMeteredMd, r.custMeteredNmd]));
+  const custUnmetered = sum(latest.flatMap((r) => [r.custUnmeteredMd, r.custUnmeteredNmd]));
+  const md = sum(latest.flatMap((r) => [r.custMeteredMd, r.custUnmeteredMd])), mdMetered = sum(latest.map((r) => r.custMeteredMd));
   const kwhPerMeteredNmd = ratio(sum(rs.map((r) => r.billedKwhMeteredNmd)), sum(rs.map((r) => r.custMeteredNmd)));
   const kwhPerUnmeteredNmd = ratio(sum(rs.map((r) => r.billedKwhUnmeteredNmd)), sum(rs.map((r) => r.custUnmeteredNmd)));
   const be = ratio(billedKwh, received), beNgn = ratio(billedNgn, receivedNgn), ce = ratio(collected, billedNgn);
@@ -171,21 +201,22 @@ export function summariseCommercial(rs: CM[]) {
   };
 }
 
-export async function commercial(period: string, opts: { licensee?: string | null; trendMonths?: number } = {}) {
-  const months = window(period, opts.trendMonths ?? 7);
+export async function commercial(period: string, opts: { licensee?: string | null; trendMonths?: number } & SpanOpts = {}) {
+  const { span, prevSpan } = spanOf(period, opts);
+  const months = window(period, opts.trendMonths ?? Math.max(7, span.length));
   const ytd = monthsBetween(yearStart(period), period);
-  const all = [...new Set([...months, ...ytd])];
+  const all = uniq([...months, ...ytd, ...span, ...prevSpan]);
   const L = opts.licensee;
   const [rows, hubs, caps, met, tech] = await Promise.all([
     db.select().from(schema.commercialMonthly).where(and(inArray(schema.commercialMonthly.period, all), L ? eq(schema.commercialMonthly.licenseeId, L) : undefined)),
     db.select().from(schema.hubs),
-    db.select().from(schema.energyCaps).where(and(inArray(schema.energyCaps.period, months), L ? eq(schema.energyCaps.licenseeId, L) : undefined)),
-    db.select().from(schema.meteringMonthly).where(and(inArray(schema.meteringMonthly.period, months), L ? eq(schema.meteringMonthly.licenseeId, L) : undefined)),
-    technical(period, { licensee: L }),
+    db.select().from(schema.energyCaps).where(and(inArray(schema.energyCaps.period, uniq([...months, ...span])), L ? eq(schema.energyCaps.licenseeId, L) : undefined)),
+    db.select().from(schema.meteringMonthly).where(and(inArray(schema.meteringMonthly.period, uniq([...months, ...span])), L ? eq(schema.meteringMonthly.licenseeId, L) : undefined)),
+    technical(period, { licensee: L, trendMonths: opts.trendMonths, months: span, prevMonths: prevSpan }),
   ]);
   const hubName = (id: string | null) => hubs.find((h) => h.id === id)?.name ?? "Unassigned";
-  const cur = rows.filter((r) => r.period === period);
-  const capCur = caps.filter((c) => c.period === period);
+  const cur = rows.filter((r) => span.includes(r.period));
+  const capCur = caps.filter((c) => span.includes(c.period));
   const feederMetered = new Map(tech.byHub.map((h) => [h.hubId, h.delivered]));
   const byHub = [...new Set(cur.map((r) => r.hubId))].map((h) => {
     const s = summariseCommercial(cur.filter((r) => r.hubId === h));
@@ -197,9 +228,9 @@ export async function commercial(period: string, opts: { licensee?: string | nul
   const byLicensee = [...new Set(cur.map((r) => r.licenseeId))].map((l) => ({ licenseeId: l, ...summariseCommercial(cur.filter((r) => r.licenseeId === l)) }));
   const trend = months.map((m) => ({ period: m, ...summariseCommercial(rows.filter((r) => r.period === m)) }));
   const total = summariseCommercial(cur);
-  const metCur = met.filter((m) => m.period === period);
+  const metCur = met.filter((m) => span.includes(m.period));
   return {
-    period, months, total, prev: summariseCommercial(rows.filter((r) => r.period === addMonths(period, -1))), ytd: summariseCommercial(rows.filter((r) => ytd.includes(r.period))),
+    period, months, span, total, prev: summariseCommercial(rows.filter((r) => prevSpan.includes(r.period))), ytd: summariseCommercial(rows.filter((r) => ytd.includes(r.period))),
     byHub, byLicensee, trend, hasData: cur.length > 0,
     reconciliation: { feederDeliveredMwh: tech.total.delivered, receivedMwh: total.receivedMwh, ratio: tech.total.delivered ? total.receivedMwh / tech.total.delivered : null },
     caps: {
@@ -218,15 +249,16 @@ export async function commercial(period: string, opts: { licensee?: string | nul
 
 // ----------------------------------------------------------------- complaints
 
-export async function complaints(period: string, opts: { licensee?: string | null } = {}) {
-  const months = window(period, 7);
+export async function complaints(period: string, opts: { licensee?: string | null } & SpanOpts = {}) {
+  const { span } = spanOf(period, opts);
+  const months = window(period, Math.max(7, span.length));
   const L = opts.licensee;
   const [rows, lics, cust] = await Promise.all([
     db.select().from(schema.complaintsMonthly).where(and(inArray(schema.complaintsMonthly.period, months), L ? eq(schema.complaintsMonthly.licenseeId, L) : undefined)),
     db.select().from(schema.licensees),
     db.select().from(schema.commercialMonthly).where(and(eq(schema.commercialMonthly.period, period), L ? eq(schema.commercialMonthly.licenseeId, L) : undefined)),
   ]);
-  const cur = rows.filter((r) => r.period === period);
+  const cur = rows.filter((r) => span.includes(r.period));
   const received = sum(cur.map((r) => r.received)), resolved = sum(cur.map((r) => r.resolved));
   const inTimeRows = cur.filter((r) => r.resolvedInTime != null);
   const customers = sum(cust.flatMap((c) => [c.custMeteredMd, c.custMeteredNmd, c.custUnmeteredMd, c.custUnmeteredNmd]));
@@ -245,24 +277,30 @@ export async function complaints(period: string, opts: { licensee?: string | nul
 
 // ----------------------------------------------------------------- Commission and data quality
 
-export async function commission(period: string) {
-  const rows = await db.select().from(schema.commissionMonthly).where(eq(schema.commissionMonthly.period, period));
+/** Indicators that are a month-end position (not a count of activity), so a quarter or year takes the latest value. */
+const COMMISSION_STOCKS = new Set(["lic_pending", "staff_in_post", "vacancies"]);
+
+export async function commission(period: string, months: string[] = [period]) {
+  const rows = await db.select().from(schema.commissionMonthly).where(inArray(schema.commissionMonthly.period, months));
   return COMMISSION_INDICATORS.map((ind) => {
-    const r = rows.find((x) => x.indicator === ind.key);
-    return { ...ind, value: r?.value ?? null, note: r?.note ?? "" };
+    const rs = rows.filter((x) => x.indicator === ind.key).sort((a, b) => a.period.localeCompare(b.period));
+    const withV = rs.filter((r) => r.value != null);
+    const value = !withV.length ? null : COMMISSION_STOCKS.has(ind.key) ? withV.at(-1)!.value : sum(withV.map((r) => r.value));
+    return { ...ind, value, note: rs.map((r) => r.note).filter(Boolean).join(" ") };
   });
 }
 
-export async function dataQuality(period: string, licensee?: string | null) {
+export async function dataQuality(period: string, licensee?: string | null, months: string[] = [period]) {
   const fs = await db.select({ f: schema.filings, s: schema.submissions }).from(schema.filings)
     .innerJoin(schema.submissions, eq(schema.submissions.id, schema.filings.submissionId))
-    .where(and(inArray(schema.filings.period, [period, "register"]), licensee ? eq(schema.filings.licenseeId, licensee) : undefined));
+    .where(and(inArray(schema.filings.period, [...months, "register"]), licensee ? eq(schema.filings.licenseeId, licensee) : undefined));
   const lics = await db.select().from(schema.licensees);
   const items: { licensee: string; dataset: DatasetCode; issue: Issue }[] = [];
-  for (const { f, s } of fs) for (const i of s.issues) if (i.level === "warning" && (!i.period || i.period === period))
+  const seen = new Set<string>(); // a submission covering several months is filed once per month; count its issues once
+  for (const { f, s } of fs) if (!seen.has(s.id) && seen.add(s.id)) for (const i of s.issues) if (i.level === "warning" && (!i.period || months.includes(i.period)))
     items.push({ licensee: f.licenseeId === COMMISSION_FILER ? "OGSERC" : lics.find((l) => l.id === f.licenseeId)?.code || f.licenseeId, dataset: f.dataset, issue: i });
   const byKind = new Map<string, number>();
   for (const it of items) { const k = `${DATASETS[it.dataset].short}: ${it.issue.message.replace(/\(.*?\)|[\d.,]+ MWh/g, "").replace(/\s+/g, " ").replace(/\s+([.,;])/g, "$1").trim()}`; byKind.set(k, (byKind.get(k) ?? 0) + 1); }
-  const validated = fs.filter((x) => x.f.period === period && x.s.status === "accepted").length;
-  return { count: items.length, items, byKind: [...byKind.entries()].map(([k, n]) => ({ kind: k, n })).sort((a, b) => b.n - a.n), examples: fs.some((x) => x.s.isExample), validatedReturns: validated, returns: fs.filter((x) => x.f.period === period).length };
+  const validated = fs.filter((x) => months.includes(x.f.period) && x.s.status === "accepted").length;
+  return { count: items.length, items, byKind: [...byKind.entries()].map(([k, n]) => ({ kind: k, n })).sort((a, b) => b.n - a.n), examples: fs.some((x) => x.s.isExample), validatedReturns: validated, returns: fs.filter((x) => months.includes(x.f.period)).length };
 }
