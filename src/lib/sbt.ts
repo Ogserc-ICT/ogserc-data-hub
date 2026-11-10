@@ -9,8 +9,10 @@ export const OPEN_REFERRAL = (status: string) => !/remedied|downgraded|closed/i.
 /**
  * Service-based tariff band monitoring, as in the OGSERC Feeder Register and SBT Monitoring workbook:
  * monthly status against the band floor, consecutive breach runs, referral candidates and data-quality flags.
+ * `span` is the reporting span ending at `period` (one month, a quarter or a year): each feeder also gets its
+ * average hours and months met / breached over the span. Runs, candidates and flags are as at `period`.
  */
-export async function sbtMonitor(period: string, licensee?: string | null) {
+export async function sbtMonitor(period: string, licensee?: string | null, span: string[] = [period]) {
   const s = await getSettings();
   const year = period.slice(0, 4);
   const months: string[] = [];
@@ -35,6 +37,9 @@ export async function sbtMonitor(period: string, licensee?: string | null) {
     let run = 0; for (let p = period; status(p) === "Breach" && run < 24; p = addMonths(p, -1)) run++;
     const ytdHours = months.map((p) => m.get(p)?.hoursPerDay).filter((x): x is number => x != null);
     const series = months.map((p) => m.get(p)?.hoursPerDay ?? null);
+    const spanHours = span.map((p) => m.get(p)?.hoursPerDay).filter((x): x is number => x != null);
+    const spanAvg = spanHours.length ? spanHours.reduce((a, b) => a + b, 0) / spanHours.length : null;
+    const spanStatuses = span.map((p) => status(p));
     // data quality, as in the SBT workbook: missing months, zero-hour months, straight-line (interpolated) runs
     const missing = months.filter((p) => m.get(p)?.hoursPerDay == null).length;
     const zero = series.filter((x) => x === 0).length;
@@ -58,14 +63,21 @@ export async function sbtMonitor(period: string, licensee?: string | null) {
       monthsMet: months.filter((p) => status(p) === "Met").length, monthsBreached: months.filter((p) => status(p) === "Breach").length,
       statuses: months.map((p) => status(p)), candidate: run >= s.sbtConsecutive && !open.length, openReferral: open[0]?.ref ?? null, dq, missing, zero, straight,
       deliveryRatio: dr, techFlag,
+      spanAvg, spanShortfall: spanAvg != null ? Math.max(0, floor - spanAvg) : null, spanStatuses,
+      spanMet: spanStatuses.filter((x) => x === "Met").length, spanBreached: spanStatuses.filter((x) => x === "Breach").length,
+      spanStatus: (spanAvg == null ? "No data" : spanAvg >= floor ? "Met" : "Breach") as "Met" | "Breach" | "No data",
     };
   });
+  const inSpan = (d: string | null | undefined) => !!d && span.includes(d.slice(0, 7));
   return {
-    period, months, list, consecutive: s.sbtConsecutive, tolerance: s.sbtTolerance,
+    period, months, span, list, consecutive: s.sbtConsecutive, tolerance: s.sbtTolerance,
     totals: {
       monitored: list.length, reported: list.filter((x) => x.status !== "No data").length, met: list.filter((x) => x.status === "Met").length,
       breaches: list.filter((x) => x.status === "Breach").length, candidates: list.filter((x) => x.candidate).length,
-      openReferrals: refs.filter((r) => OPEN_REFERRAL(r.status)).length, dqFlags: list.filter((x) => x.dq !== "OK").length, techFlags: list.filter((x) => x.techFlag).length,
+      openReferrals: refs.filter((r) => OPEN_REFERRAL(r.status)).length, referredInSpan: refs.filter((r) => inSpan(r.referredOn)).length,
+      spanReported: list.filter((x) => x.spanStatus !== "No data").length, spanMet: list.filter((x) => x.spanStatus === "Met").length,
+      spanBreachedAny: list.filter((x) => x.spanBreached > 0).length, feederMonthsBreached: list.reduce((a, x) => a + x.spanBreached, 0),
+      feederMonthsReported: list.reduce((a, x) => a + x.spanMet + x.spanBreached, 0), dqFlags: list.filter((x) => x.dq !== "OK").length, techFlags: list.filter((x) => x.techFlag).length,
     },
     referrals: refs.map((r) => { const f = feeders.find((x) => x.id === r.feederId); return f ? { ...r, feederName: f.name, hub: hubs.find((h) => h.id === f.hubId)?.name ?? r.hub } : r; }).sort((a, b) => b.ref.localeCompare(a.ref)),
   };

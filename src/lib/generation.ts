@@ -1,7 +1,7 @@
 import "server-only";
 import { inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { daysIn, window } from "./periods";
+import { addMonths, daysIn, window } from "./periods";
 import { getSettings } from "./settings-db";
 import { recommendation, weightedScore, type Settings } from "./settings";
 
@@ -9,17 +9,27 @@ const sum = (xs: (number | null | undefined)[]) => xs.reduce<number>((a, b) => a
 const e = (x: Record<string, unknown>, k: string) => (typeof x[k] === "number" ? (x[k] as number) : null);
 const r = (a: number, b: number) => (b ? a / b : null);
 
-/** Generation KPIs on the EMPR generation workbook's method, plus the register and plan cycle. */
-export async function generation(period: string, span: string[] = [period]) {
+/**
+ * Generation KPIs on the EMPR generation workbook's method, plus the register and plan cycle.
+ * `span` is the reporting span ending at `period`; `prevSpan` the span it is compared with (default: the same
+ * number of months immediately before). `licensee` narrows everything to one generating licensee's plants.
+ */
+export async function generation(period: string, span: string[] = [period], opts: { licensee?: string | null; prevSpan?: string[] } = {}) {
   const s = await getSettings();
+  const L = opts.licensee ?? null;
   const months = window(period, Math.max(7, span.length));
-  const [assets, units, plantRows, evals, lics] = await Promise.all([
+  const prevSpan = opts.prevSpan?.length ? opts.prevSpan : span.map((m) => addMonths(m, -span.length));
+  const [allAssets, allUnits, allPlantRows, allEvals, lics] = await Promise.all([
     db.select().from(schema.generationAssets),
-    db.select().from(schema.genUnitMonthly).where(inArray(schema.genUnitMonthly.period, months)),
+    db.select().from(schema.genUnitMonthly).where(inArray(schema.genUnitMonthly.period, [...new Set([...months, ...prevSpan])])),
     db.select().from(schema.genPlantMonthly).where(inArray(schema.genPlantMonthly.period, span)),
     db.select().from(schema.planEvaluations),
     db.select().from(schema.licensees),
   ]);
+  const assets = L ? allAssets.filter((a) => a.licenseeId === L) : allAssets;
+  const units = L ? allUnits.filter((u) => u.licenseeId === L) : allUnits;
+  const plantRows = L ? allPlantRows.filter((p) => p.licenseeId === L) : allPlantRows;
+  const evals = L ? allEvals.filter((ev) => assets.some((a) => a.id === ev.plantId)) : allEvals;
   const cap = (xs: typeof assets) => sum(xs.map((a) => a.capacityMw));
   const group = (key: (a: (typeof assets)[number]) => string) => [...new Set(assets.map(key))].map((k) => ({ key: k, plants: assets.filter((a) => key(a) === k).length, capacity: cap(assets.filter((a) => key(a) === k)) })).sort((a, b) => b.capacity - a.capacity);
 
@@ -69,8 +79,10 @@ export async function generation(period: string, span: string[] = [period]) {
     plants: assets.length, capacity: cap(assets), available: sum(assets.map((a) => a.availableMw)),
     byCategory: group((a) => a.category || "Unspecified"), byFuel: group((a) => a.fuel || "Not stated"), byStatus: group((a) => a.status || "Not recorded"),
     largest: [...assets].sort((a, b) => (b.capacityMw ?? 0) - (a.capacityMw ?? 0)).slice(0, 10),
-    month: cur.length ? kpis(cur) : null, plantKpis, trend: months.map((m) => ({ period: m, ...kpis(units.filter((u) => u.period === m)) })),
-    plans, planDue, settings: s,
+    month: cur.length ? kpis(cur) : null, prev: (() => { const p = units.filter((u) => prevSpan.includes(u.period)); return p.length ? kpis(p) : null; })(), plantKpis, trend: months.map((m) => ({ period: m, ...kpis(units.filter((u) => u.period === m)) })),
+    plans, planDue, settings: s, span, prevSpan,
+    plansReceivedInSpan: plans.filter((p) => span.includes(p.receivedOn.slice(0, 7))).length,
+    plansDecidedInSpan: plans.filter((p) => p.decidedOn && span.includes(p.decidedOn.slice(0, 7))).length,
   };
 }
 
