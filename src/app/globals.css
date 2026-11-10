@@ -283,8 +283,11 @@ nav.seg a[aria-current="page"]{background:var(--accent);border-color:var(--accen
    Borders rather than fills, so it prints without "Background graphics". */
 .lh-part{display:none}
 @media print{
-  @page{size:A4;margin:16mm 18mm}
+  /* Every page keeps the full A4 width: browsers lay the whole document out at the first page's width, so only the
+     top and bottom margins may differ. The side margins are padding on the report's sections instead. */
+  @page{size:A4;margin:16mm 0}
   @page :first{margin:0}
+  .report>:not(.lh-page){padding-left:18mm;padding-right:18mm}
   .lh-page{position:relative;height:296mm;overflow:hidden;box-sizing:border-box;padding:56mm 20mm 34mm;break-after:page;display:flex;flex-direction:column}
   .lh-page .lh-part{display:block}
   .lh-border{position:absolute;inset:7.8mm;border:3px double #0B5D2A;pointer-events:none}
@@ -298,6 +301,17 @@ nav.seg a[aria-current="page"]{background:var(--accent);border-color:var(--accen
   .lh-foot p{margin:0 0 1.8mm;padding-top:1.8mm;border-top:.75pt solid #0B5D2A;font-family:Georgia,"Times New Roman",serif;font-size:8.5pt;color:#4A4A4A}
   .lh-band{border-top:4pt solid #0B5D2A;border-bottom:2pt solid #F2A900}
   .lh-page .cover{position:relative;z-index:1;break-after:auto;min-height:0;justify-content:flex-start}
+  /* Nothing may be wider than the page: one over-wide table makes the browser shrink every page, letterhead included. */
+  .report{max-width:none;margin:0}
+  .report table{width:100%;max-width:100%}
+  .report th,.report td,.report .nowrap td,.report .pill,.report .st{white-space:normal;overflow-wrap:anywhere}
+  .report th{letter-spacing:0}
+  .report table.compact{font-size:8.5pt}
+  .report table.compact th,.report table.compact td{padding:3px 5px}
+  .report table.ind td:first-child{min-width:0}
+  .report table.meta{width:auto}
+  .report table.meta th,.report table.meta td.num{white-space:nowrap;overflow-wrap:normal}
+  .report .cellinput{min-width:0}
 }
 @media print{
   .print-only{display:inline}
