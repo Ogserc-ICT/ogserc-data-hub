@@ -140,6 +140,18 @@ export default async function ReportPage({ searchParams }: { searchParams: Promi
         </div>
       </div>
 
+      {/* Printed first page on the OGSERC letterhead (registers/OGSERC_Letterhead_1_Classic.docx); the letterhead parts show only in print. */}
+      <div className="lh-page">
+      <div className="lh-part lh-border" aria-hidden="true" />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="lh-part lh-watermark" src="/brand/letterhead-watermark.jpg" alt="" aria-hidden="true" />
+      <div className="lh-part lh-head">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="lh-logo" src="/brand/letterhead-logo.png" alt="OGSERC" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="lh-name" src="/brand/letterhead-name.png" alt="Ogun State Electricity Regulatory Commission" />
+        <div className="lh-rule" />
+      </div>
       <header className="cover">
         <span className="eyebrow">Ogun State Electricity Regulatory Commission (OGSERC) · EMPR Division</span>
         <h1>OGEM {EDITION[kind]} Market Report</h1>
@@ -154,6 +166,11 @@ export default async function ReportPage({ searchParams }: { searchParams: Promi
         {dq.examples && <p className="notice err">This edition includes example data in some sections. Remove it before issue.</p>}
         <nav className="toc no-print">{SECTIONS.map(([id, t], i) => <a key={id} href={`#${id}`}>{i + 1}. {t}</a>)}</nav>
       </header>
+      <div className="lh-part lh-foot">
+        <p>Floors 5 &amp; 6, OPIC Towers, Central Business District, Oke-Ilewo, Abeokuta, Ogun State</p>
+        <div className="lh-band" />
+      </div>
+      </div>
 
       <Section id="summary" n={1} title="Executive summary">
         <div className="kpis">

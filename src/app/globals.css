@@ -279,6 +279,26 @@ nav.seg a{font-size:13px;padding:4px 10px;border:1px solid var(--line);border-ra
 nav.seg a[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--none-soft);border:1px solid var(--line)}
 .dot.ok{background:var(--ok);border-color:var(--ok)} .dot.bad{background:var(--bad);border-color:var(--bad)}
+/* ---- letterhead: the report's first printed page, after registers/OGSERC_Letterhead_1_Classic.docx (A4).
+   Borders rather than fills, so it prints without "Background graphics". */
+.lh-part{display:none}
+@media print{
+  @page{size:A4;margin:16mm 18mm}
+  @page :first{margin:0}
+  .lh-page{position:relative;height:296mm;overflow:hidden;box-sizing:border-box;padding:56mm 20mm 34mm;break-after:page;display:flex;flex-direction:column}
+  .lh-page .lh-part{display:block}
+  .lh-border{position:absolute;inset:7.8mm;border:3px double #0B5D2A;pointer-events:none}
+  .lh-watermark{position:absolute;left:50%;top:50%;width:137mm;transform:translate(-50%,-50%);opacity:.07;z-index:0}
+  .lh-page .lh-head{position:absolute;top:13mm;left:20mm;right:20mm;display:flex;flex-direction:column;align-items:center}
+  .lh-logo{width:53mm;height:auto;margin-bottom:1.4mm}
+  .lh-name{width:150mm;height:auto}
+  /* gold rule over a thin green one */
+  .lh-rule{align-self:stretch;margin-top:2.5mm;height:.8mm;border-top:2.25pt solid #F2A900;border-bottom:.75pt solid #0B5D2A}
+  .lh-foot{position:absolute;bottom:13mm;left:20mm;right:20mm;text-align:center}
+  .lh-foot p{margin:0 0 1.8mm;padding-top:1.8mm;border-top:.75pt solid #0B5D2A;font-family:Georgia,"Times New Roman",serif;font-size:8.5pt;color:#4A4A4A}
+  .lh-band{border-top:4pt solid #0B5D2A;border-bottom:2pt solid #F2A900}
+  .lh-page .cover{position:relative;z-index:1;break-after:auto;min-height:0;justify-content:flex-start}
+}
 @media print{
   .print-only{display:inline}
   .findings textarea{display:none}
